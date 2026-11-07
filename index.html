@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Probador de Cuadros AR</title>
+<meta name="theme-color" content="#0f1016">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600&display=swap">
+<style>
+/* Layout: una columna de pasos tipo "mesa de taller"; la cámara abre a pantalla completa encima */
+:root{
+  --bg:#0f1016; --panel:#181a23; --line:#2a2d3a; --fg:#eceaf2; --muted:#9a9cab;
+  --accent:#ff7a3d; --accent-ink:#1a0d05; --ok:#4fd18b;
+  --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body:"Figtree", "Segoe UI", system-ui, sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--body);-webkit-font-smoothing:antialiased}
+[hidden]{display:none!important}
+.wrap{max-width:560px;margin:0 auto;padding-block:max(20px, env(safe-area-inset-top,0px)) max(32px, env(safe-area-inset-bottom,0px));
+  padding-left:max(16px, env(safe-area-inset-left,0px));padding-right:max(16px, env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:18px}
+header h1{font:800 clamp(28px,8vw,40px)/1.02 var(--display);margin:0;letter-spacing:-.02em;text-wrap:balance}
+header h1 span{color:var(--accent)}
+header p{margin:8px 0 0;color:var(--muted);max-width:60ch}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.step h2{margin:0;font:600 17px/1.2 var(--display);display:flex;gap:10px;align-items:baseline}
+.step h2 b{font:800 13px/1 var(--display);color:var(--accent-ink);background:var(--accent);border-radius:99px;padding:5px 9px}
+.hint{margin:0;color:var(--muted);font-size:13.5px}
+.pick{display:flex;align-items:center;justify-content:center;gap:8px;min-height:52px;border:1.5px dashed var(--line);border-radius:12px;
+  color:var(--fg);font-weight:600;cursor:pointer;padding:12px;text-align:center}
+.pick:hover,.pick:focus-within{border-color:var(--accent)}
+.pick input{position:absolute;opacity:0;width:1px;height:1px}
+.preview{border-radius:10px;overflow:hidden;background:#000;max-height:260px;display:flex;justify-content:center}
+.preview img,.preview video{max-width:100%;max-height:260px;display:block}
+.row{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center}
+.row label{font-weight:500}
+.row output{font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px}
+.row input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+.check{display:flex;gap:10px;align-items:center;font-weight:500}
+.check input{width:20px;height:20px;accent-color:var(--accent)}
+button.go{font:700 17px/1 var(--display);background:var(--accent);color:var(--accent-ink);border:0;border-radius:14px;padding:18px;cursor:pointer}
+button.go:disabled{opacity:.4;cursor:not-allowed}
+button:focus-visible,.pick:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.msg{font-size:14px;color:var(--muted);margin:0}
+.msg.err{color:#ff8a8a}
+.foot{color:var(--muted);font-size:12.5px}
+/* Pantalla de cámara */
+#ar{position:fixed;inset:0;background:#000;z-index:20}
+#ar .stage{position:absolute;inset:0;overflow:hidden}
+#ar .top{position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:center;gap:8px;z-index:30;
+  padding:max(12px, env(safe-area-inset-top,0px)) max(12px, env(safe-area-inset-right,0px)) 12px max(12px, env(safe-area-inset-left,0px));
+  background:linear-gradient(#000a,#0000)}
+#ar .top button{font:600 15px/1 var(--body);background:#000b;color:#fff;border:1px solid #fff4;border-radius:99px;padding:11px 16px;cursor:pointer}
+#ar .status{color:#fff;font-weight:600;text-shadow:0 1px 3px #000;font-size:14px}
+#ar .status.on{color:var(--ok)}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style>
+</head>
+<body>
+<main class="wrap" id="setup">
+  <header>
+    <h1>Probador de cuadros <span>AR</span></h1>
+    <p>Elegí la imagen del cuadro y lo que querés que aparezca encima. Después apuntá la cámara al cuadro (impreso o mostrado en otra pantalla) y mirá cómo cobra vida.</p>
+  </header>
+
+  <section class="step">
+    <h2><b>1</b> Imagen del cuadro</h2>
+    <label class="pick" id="pickTarget"><input type="file" id="targetFile" accept="image/*">Elegir imagen</label>
+    <div class="preview" id="targetPrev" hidden></div>
+    <p class="hint">Es lo que la cámara va a reconocer. Funciona mejor con imágenes con detalle y contraste, no con fondos lisos.</p>
+  </section>
+
+  <section class="step">
+    <h2><b>2</b> Lo que aparece encima</h2>
+    <label class="pick"><input type="file" id="overlayFile" accept="video/*,image/*">Elegir video o imagen</label>
+    <div class="preview" id="overlayPrev" hidden></div>
+    <p class="hint">Un video (saludo, animación, loop) o una imagen PNG con fondo transparente para que algo "salga" del cuadro.</p>
+  </section>
+
+  <section class="step">
+    <h2><b>3</b> Ajustes</h2>
+    <div class="row"><label for="scale">Tamaño</label><output id="scaleOut">100 %</output>
+      <input type="range" id="scale" min="50" max="200" step="5" value="100"></div>
+    <div class="row"><label for="lift">Altura sobre el cuadro</label><output id="liftOut">0</output>
+      <input type="range" id="lift" min="0" max="60" step="2" value="0"></div>
+    <div class="row"><label for="opacity">Opacidad</label><output id="opacityOut">100 %</output>
+      <input type="range" id="opacity" min="20" max="100" step="5" value="100"></div>
+    <label class="check"><input type="checkbox" id="sound" checked> Video con sonido</label>
+    <label class="check"><input type="checkbox" id="pauseLost" checked> Pausar el video cuando se deja de ver el cuadro</label>
+  </section>
+
+  <button class="go" id="go" disabled>Preparar y abrir cámara</button>
+  <div id="progress" hidden>
+    <div class="bar"><i id="barFill"></i></div>
+  </div>
+  <p class="msg" id="msg">Elegí la imagen del cuadro y lo que va encima para empezar.</p>
+  <p class="foot">Todo se procesa en tu celular: las imágenes y videos no se suben a ningún lado. Necesita abrirse desde un link con https.</p>
+</main>
+
+<div id="ar" hidden>
+  <div class="stage" id="stage"></div>
+  <div class="top">
+    <span class="status" id="status">Buscando el cuadro…</span>
+    <button id="close">Cerrar</button>
+  </div>
+</div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.150.1/examples/jsm/",
+  "mindar-image":"https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js",
+  "mindar-image-three":"https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+}}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { Compiler } from "mindar-image";
+import { MindARThree } from "mindar-image-three";
+
+const $ = (id) => document.getElementById(id);
+const state = { targetFile:null, targetImg:null, overlayFile:null, overlayIsVideo:false, overlayURL:null, cache:null, ar:null, video:null };
+let plane = null;
+
+function setMsg(text, err){ $("msg").textContent = text; $("msg").classList.toggle("err", !!err); }
+function ready(announce = true){ $("go").disabled = !(state.targetImg && state.overlayFile); if(!$("go").disabled && announce) setMsg("Listo. Tocá el botón para preparar el cuadro y abrir la cámara."); }
+function hasWebGL(){ try { const c = document.createElement("canvas"); return !!(c.getContext("webgl2") || c.getContext("webgl")); } catch(_) { return false; } }
+const withTimeout = (p, ms, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label)), ms))]);
+
+for (const [id,fmt] of [["scale",v=>v+" %"],["lift",v=>v],["opacity",v=>v+" %"]]){
+  const el=$(id), out=$(id+"Out"); const upd=()=>{ out.textContent=fmt(el.value); applyAdjust(); }; el.addEventListener("input",upd); upd();
+}
+
+$("targetFile").addEventListener("change", (e) => {
+  const f = e.target.files[0]; if(!f) return;
+  state.targetFile = f; state.cache = null;
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = () => { state.targetImg = img; $("targetPrev").replaceChildren(img.cloneNode()); $("targetPrev").hidden = false; ready(); };
+  img.onerror = () => setMsg("No pude abrir esa imagen. Probá con un JPG o PNG.", true);
+  img.src = url;
+});
+
+$("overlayFile").addEventListener("change", (e) => {
+  const f = e.target.files[0]; if(!f) return;
+  if (state.overlayURL) URL.revokeObjectURL(state.overlayURL);
+  state.overlayFile = f; state.overlayIsVideo = f.type.startsWith("video/");
+  state.overlayURL = URL.createObjectURL(f);
+  const el = state.overlayIsVideo ? Object.assign(document.createElement("video"), {src:state.overlayURL, muted:true, playsInline:true, loop:true, autoplay:true})
+                                  : Object.assign(document.createElement("img"), {src:state.overlayURL});
+  $("overlayPrev").replaceChildren(el); $("overlayPrev").hidden = false; ready();
+});
+
+async function compileTarget(){
+  if (state.cache) return state.cache;
+  // reducir imágenes enormes para que el celular compile rápido
+  const img = state.targetImg, maxSide = 1024, k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement("canvas"); c.width = Math.round(img.naturalWidth*k); c.height = Math.round(img.naturalHeight*k);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  const small = new Image(); small.src = c.toDataURL("image/jpeg", .92); await small.decode();
+  const compiler = new Compiler();
+  await compiler.compileImageTargets([small], (p) => { $("barFill").style.width = Math.min(100, p).toFixed(0) + "%"; });
+  const data = await compiler.exportData();
+  state.cache = { url: URL.createObjectURL(new Blob([data])), aspect: c.height / c.width };
+  return state.cache;
+}
+
+function applyAdjust(){
+  if (!plane) return;
+  const s = $("scale").value/100;
+  plane.scale.set(s, s, 1);
+  plane.position.z = $("lift").value/100;
+  plane.material.opacity = $("opacity").value/100;
+}
+
+async function makeOverlay(aspect){
+  let tex, w = 1, h = aspect;
+  if (state.overlayIsVideo){
+    const v = document.createElement("video");
+    Object.assign(v, {src:state.overlayURL, loop:true, playsInline:true, crossOrigin:"anonymous"});
+    v.setAttribute("playsinline",""); v.muted = !$("sound").checked;
+    await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(new Error("video")); });
+    state.video = v; tex = new THREE.VideoTexture(v);
+    h = v.videoHeight / v.videoWidth;
+  } else {
+    const img = new Image(); img.src = state.overlayURL; await img.decode();
+    tex = new THREE.Texture(img); tex.needsUpdate = true; h = img.naturalHeight / img.naturalWidth;
+  }
+  tex.encoding = THREE.sRGBEncoding;
+  // que el contenido entre dentro del ancho del cuadro, respetando su forma
+  if (h > aspect){ w = aspect / h; h = aspect; }
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide });
+  plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+  applyAdjust();
+  return plane;
+}
+
+async function start(){
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia){
+    setMsg("La cámara solo funciona si abrís esta página desde un link con https (por ejemplo, el de Netlify o GitHub Pages).", true); return;
+  }
+  if (!hasWebGL()){ setMsg("Este navegador no tiene WebGL activado, y el probador lo necesita. Probá con Chrome actualizado.", true); return; }
+  $("go").disabled = true; $("progress").hidden = false; setMsg("Preparando el cuadro… la primera vez tarda unos segundos.");
+  let failed = false;
+  try{
+    const { url, aspect } = await withTimeout(compileTarget(), 180000, "la preparación del cuadro tardó demasiado");
+    setMsg("Abriendo la cámara…");
+    $("ar").hidden = false;
+    // desbloquear el video con el toque del usuario (los celulares no dejan reproducir con sonido sin un toque)
+    const overlay = await makeOverlay(aspect);
+    if (state.video){ try { await state.video.play(); state.video.pause(); } catch(_){} }
+    const ar = new MindARThree({ container: $("stage"), imageTargetSrc: url, uiScanning: "no", uiLoading: "no", filterMinCF: 0.0001, filterBeta: 0.001 });
+    state.ar = ar;
+    const { renderer, scene, camera } = ar;
+    const anchor = ar.addAnchor(0);
+    anchor.group.add(overlay);
+    anchor.onTargetFound = () => { $("status").textContent = "Cuadro detectado"; $("status").classList.add("on"); state.video?.play().catch(()=>{}); };
+    anchor.onTargetLost = () => { $("status").textContent = "Buscando el cuadro…"; $("status").classList.remove("on"); if ($("pauseLost").checked) state.video?.pause(); };
+    await ar.start();
+    renderer.setAnimationLoop(() => renderer.render(scene, camera));
+    setMsg("Cámara abierta.");
+  } catch (err){
+    console.error(err); failed = true;
+    await stop();
+    const denied = err && (err.name === "NotAllowedError" || /permission/i.test(String(err)));
+    const badVideo = err && err.message === "video";
+    setMsg(denied ? "El navegador no dio permiso para la cámara. Habilitala en los permisos del sitio y volvé a intentar."
+         : badVideo ? "No pude reproducir ese video. Probá con un MP4 grabado o exportado desde el celular."
+         : "No se pudo abrir el probador (" + (err?.message || err) + "). Probá con otra imagen o recargá la página.", true);
+  } finally {
+    $("progress").hidden = true; $("barFill").style.width = "0"; ready(!failed && $("ar").hidden);
+  }
+}
+
+async function stop(){
+  try { state.ar?.renderer.setAnimationLoop(null); await state.ar?.stop(); } catch(_){}
+  state.ar = null; state.video?.pause(); state.video = null; plane = null;
+  $("stage").replaceChildren(); $("ar").hidden = true;
+  $("status").textContent = "Buscando el cuadro…"; $("status").classList.remove("on");
+}
+
+$("go").addEventListener("click", start);
+$("close").addEventListener("click", () => { stop(); setMsg("Listo. Podés cambiar ajustes y volver a abrir la cámara."); });
+// exponer para pruebas
+window.__ar = { compileTarget, state };
+</script>
+</body>
+</html>

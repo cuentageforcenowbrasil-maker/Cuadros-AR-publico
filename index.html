@@ -181,10 +181,18 @@ function applyAdjust(){
 async function makeOverlay(aspect){
   let tex, w = 1, h = aspect;
   if (state.overlayIsVideo){
+    // liberar el video de la vista previa: muchos celulares no decodifican dos videos a la vez junto con la cámara
+    const prev = $("overlayPrev").querySelector("video");
+    if (prev){ prev.pause(); prev.removeAttribute("src"); prev.load(); }
     const v = document.createElement("video");
-    Object.assign(v, {src:state.overlayURL, loop:true, playsInline:true, crossOrigin:"anonymous"});
-    v.setAttribute("playsinline",""); v.muted = !$("sound").checked;
-    await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(new Error("video")); });
+    v.loop = true; v.playsInline = true; v.setAttribute("playsinline",""); v.preload = "auto";
+    v.muted = !$("sound").checked;
+    const loaded = new Promise((res, rej) => {
+      v.addEventListener("loadeddata", res, { once: true });
+      v.addEventListener("error", () => rej(new Error("video")), { once: true });
+    });
+    v.src = state.overlayURL; v.load();
+    await withTimeout(loaded, 20000, "video");
     state.video = v; tex = new THREE.VideoTexture(v);
     h = v.videoHeight / v.videoWidth;
   } else {
@@ -201,7 +209,8 @@ async function makeOverlay(aspect){
 }
 
 async function start(){
-  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia){
+  const okOrigin = location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  if (!okOrigin || !window.isSecureContext || !navigator.mediaDevices?.getUserMedia){
     setMsg("La cámara solo funciona si abrís esta página desde un link con https (por ejemplo, el de Netlify o GitHub Pages).", true); return;
   }
   if (!hasWebGL()){ setMsg("Este navegador no tiene WebGL activado, y el probador lo necesita. Probá con Chrome actualizado.", true); return; }
@@ -221,7 +230,7 @@ async function start(){
     anchor.group.add(overlay);
     anchor.onTargetFound = () => { $("status").textContent = "Cuadro detectado"; $("status").classList.add("on"); state.video?.play().catch(()=>{}); };
     anchor.onTargetLost = () => { $("status").textContent = "Buscando el cuadro…"; $("status").classList.remove("on"); if ($("pauseLost").checked) state.video?.pause(); };
-    await ar.start();
+    try { await ar.start(); } catch (e) { throw (e || Object.assign(new Error("camara"), { name: "NotAllowedError" })); }
     renderer.setAnimationLoop(() => renderer.render(scene, camera));
     setMsg("Cámara abierta.");
   } catch (err){
@@ -241,6 +250,8 @@ async function stop(){
   try { state.ar?.renderer.setAnimationLoop(null); await state.ar?.stop(); } catch(_){}
   state.ar = null; state.video?.pause(); state.video = null; plane = null;
   $("stage").replaceChildren(); $("ar").hidden = true;
+  const pv = $("overlayPrev").querySelector("video");
+  if (pv && state.overlayURL && !pv.getAttribute("src")){ pv.src = state.overlayURL; pv.play().catch(()=>{}); }
   $("status").textContent = "Buscando el cuadro…"; $("status").classList.remove("on");
 }
 
